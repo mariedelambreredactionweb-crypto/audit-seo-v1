@@ -1,11 +1,13 @@
 import express from "express";
 import { fetch } from "undici";
 import * as cheerio from "cheerio";
+import cors from "cors";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
+app.use(cors());
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "Audit SEO API V1" });
