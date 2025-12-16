@@ -1,0 +1,14 @@
+{
+  "name": "audit-seo-v1",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.1.2",
+    "express": "^4.19.2",
+    "undici": "^7.16.0"
+  }
+}
