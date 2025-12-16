@@ -7,7 +7,15 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
-app.use(cors());
+app.use(cors({
+  origin: [
+    "https://marie-redacweb.fr",
+    "https://www.marie-redacweb.fr"
+  ],
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type"]
+}));
+
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "Audit SEO API V1" });
