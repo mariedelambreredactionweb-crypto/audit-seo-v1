@@ -7,15 +7,15 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
-app.use(cors({
-  origin: [
-    "https://marie-redacweb.fr",
-    "https://www.marie-redacweb.fr"
-  ],
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type"]
-}));
 
+// ✅ Autorise uniquement ton site
+app.use(
+  cors({
+    origin: ["https://marie-redacweb.fr", "https://www.marie-redacweb.fr"],
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type"],
+  })
+);
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "Audit SEO API V1" });
@@ -44,7 +44,12 @@ function normalizeForMatch(s) {
   return stripAccents(cleanText(s).toLowerCase()).replace(/[^\p{L}\p{N}\s]/gu, "");
 }
 
-function containsKeyword(text, keyword) {
+// ✅ compte "réel" (unicode), plus fiable que .length
+function charCount(s) {
+  return Array.from(cleanText(s)).length;
+}
+
+function containsKeywordExact(text, keyword) {
   const t = normalizeForMatch(text);
   const k = normalizeForMatch(keyword);
   if (!t || !k) return false;
@@ -120,15 +125,17 @@ function extractImages($) {
 }
 
 function statusGlobalFromChecks(checks) {
-  const structurants = new Set(["title", "h1", "keyword_structure"]);
-  const hasRedStructurant = checks.some(
-    (c) => c.status === "red" && structurants.has(c.id)
-  );
+  // On garde un global simple : si un structurant est rouge => rouge.
+  const structurants = new Set(["title", "h1", "keyword_exact_structure"]);
+  const hasRedStructurant = checks.some((c) => c.status === "red" && structurants.has(c.id));
   if (hasRedStructurant) return "red";
+
   const hasRed = checks.some((c) => c.status === "red");
-  if (hasRed) return "orange"; // rouge non bloquant hors structurants -> orange global
+  if (hasRed) return "orange";
+
   const hasOrange = checks.some((c) => c.status === "orange");
   if (hasOrange) return "orange";
+
   return "green";
 }
 
@@ -156,7 +163,6 @@ function globalMessage(status) {
 }
 
 function buildMessagesForCheck(checkId, status, extra = {}) {
-  // Liens / CTA (tu pourras remplacer par tes URLs)
   const SERP_SIMULATOR_HINT = "👉 Tu peux retravailler ce point avec le simulateur de SERP.";
   const CALL_HINT = "👉 Si tu veux en parler lors d’un appel découverte offert, je t’accueille avec plaisir.";
 
@@ -164,8 +170,7 @@ function buildMessagesForCheck(checkId, status, extra = {}) {
     case "title": {
       if (status === "green") {
         return {
-          message:
-            "Ton title est présent, clair et bien dimensionné.\nIl aide Google à comprendre le sujet de ta page.",
+          message: "Ton title est présent, clair et bien dimensionné.\nIl aide Google à comprendre le sujet de ta page.",
           action: "",
         };
       }
@@ -186,15 +191,14 @@ function buildMessagesForCheck(checkId, status, extra = {}) {
     case "meta_description": {
       if (status === "green") {
         return {
-          message:
-            "Une meta description est bien définie.\nElle donne envie de cliquer et contextualise ta page.",
+          message: "Ta meta description est bien dimensionnée.\nElle aide à donner envie de cliquer.",
           action: "",
         };
       }
       if (status === "orange") {
         return {
           message:
-            "Ta meta description est présente, mais sa longueur peut être améliorée.\nElle risque de ne pas s’afficher correctement dans Google.",
+            "Ta meta description est présente, mais sa longueur peut être optimisée.\nElle risque d’être tronquée ou trop courte dans Google.",
           action: SERP_SIMULATOR_HINT,
         };
       }
@@ -208,15 +212,13 @@ function buildMessagesForCheck(checkId, status, extra = {}) {
     case "h1": {
       if (status === "green") {
         return {
-          message:
-            "Ton H1 est unique et bien aligné avec le sujet de ta page.\nIl pose clairement le cadre.",
+          message: "Ton H1 est unique et bien aligné avec le sujet de ta page.\nIl pose clairement le cadre.",
           action: "",
         };
       }
       if (status === "orange") {
         return {
-          message:
-            "Un H1 est présent, mais il pourrait être plus précis ou mieux aligné avec ta requête clé.",
+          message: "Un H1 est présent, mais il pourrait être plus précis ou mieux aligné avec ta requête clé.",
           action: "",
         };
       }
@@ -227,11 +229,11 @@ function buildMessagesForCheck(checkId, status, extra = {}) {
       };
     }
 
-    case "keyword_structure": {
+    case "keyword_exact_structure": {
       if (status === "green") {
         return {
           message:
-            "Ta requête clé est présente aux bons endroits de la page.\nLa structure aide clairement à comprendre le sujet traité.",
+            "Ta requête exacte est placée aux bons endroits : intro, au moins un H2 et la conclusion.\nÇa renforce le fil conducteur de ta page.",
           action: "",
         };
       }
@@ -239,37 +241,28 @@ function buildMessagesForCheck(checkId, status, extra = {}) {
         const missing = extra?.missing?.length ? extra.missing.join(", ") : "un endroit clé";
         return {
           message:
-            "Ta requête clé est présente, mais elle manque à certains endroits clés.\nPar exemple : " +
+            "Ta requête exacte est bien présente, mais il manque un repère dans la structure.\nÀ renforcer : " +
             missing +
             ".",
-          action: "👉 Astuce : renforce la cohérence en la réintégrant naturellement là où elle manque.",
+          action: "👉 Astuce : garde la requête exacte pour ces 3 endroits, et utilise des variantes ailleurs.",
         };
       }
       return {
         message:
-          "La requête clé n’est pas clairement identifiable dans la structure de ta page.\nGoogle peut avoir du mal à comprendre le sujet principal.",
-        action: "👉 Priorité : clarifier le fil conducteur de ta page.\n" + CALL_HINT,
+          "Ta requête exacte n’est pas encore posée clairement dans la structure.\nGoogle peut avoir du mal à comprendre le sujet principal.",
+        action: "👉 Priorité : placer la requête exacte dans l’intro, un H2 et la conclusion.\n" + CALL_HINT,
       };
     }
 
     case "structure": {
       if (status === "green") {
-        return {
-          message:
-            "La page est bien structurée.\nLes sous-titres facilitent la lecture et la compréhension.",
-          action: "",
-        };
+        return { message: "La page est bien structurée.\nLes sous-titres facilitent la lecture.", action: "" };
       }
       if (status === "orange") {
-        return {
-          message:
-            "Une structure est présente, mais elle pourrait être plus lisible ou mieux organisée.",
-          action: "",
-        };
+        return { message: "Une structure est présente, mais elle pourrait être renforcée.", action: "" };
       }
       return {
-        message:
-          "La page manque de structure claire.\nElle ressemble davantage à un bloc de texte continu.",
+        message: "La page manque de structure claire.\nElle ressemble davantage à un bloc de texte continu.",
         action: "👉 Action simple : découper le contenu en sections logiques avec des H2.",
       };
     }
@@ -277,17 +270,12 @@ function buildMessagesForCheck(checkId, status, extra = {}) {
     case "images_alt": {
       if (status === "green") {
         return {
-          message:
-            "Les images sont bien utilisées et leurs attributs alt sont renseignés.\nC’est un bon point pour l’accessibilité et la compréhension du contenu.",
+          message: "Les images sont bien utilisées et leurs attributs alt sont renseignés.\nBon point.",
           action: "",
         };
       }
       if (status === "orange") {
-        return {
-          message:
-            "Des images sont présentes, mais certains attributs alt manquent.",
-          action: "👉 Action simple : décrire brièvement chaque image avec des mots humains.",
-        };
+        return { message: "Des images sont présentes, mais certains attributs alt manquent.", action: "👉 Action simple : décrire brièvement chaque image." };
       }
       return {
         message:
@@ -297,47 +285,19 @@ function buildMessagesForCheck(checkId, status, extra = {}) {
     }
 
     case "readability": {
-      if (status === "green") {
-        return {
-          message:
-            "Le texte est agréable à lire.\nLes paragraphes sont bien aérés.",
-          action: "",
-        };
-      }
-      if (status === "orange") {
-        return {
-          message:
-            "Certains passages sont un peu longs et pourraient être allégés.",
-          action: "",
-        };
-      }
-      return {
-        message:
-          "La lecture est difficile : les paragraphes sont trop denses.",
-        action: "👉 Astuce : raccourcir, aérer, simplifier.",
-      };
+      if (status === "green") return { message: "Le texte est agréable à lire.\nLes paragraphes sont bien aérés.", action: "" };
+      if (status === "orange") return { message: "Certains passages sont un peu longs et pourraient être allégés.", action: "" };
+      return { message: "La lecture est difficile : les paragraphes sont trop denses.", action: "👉 Astuce : raccourcir, aérer, simplifier." };
     }
 
     case "lexical": {
       if (status === "green") {
-        return {
-          message:
-            "Le vocabulaire utilisé aide à bien contextualiser le sujet de la page.\nLe champ lexical est cohérent avec ta requête clé.",
-          action: "",
-        };
+        return { message: "Le champ lexical est cohérent avec ta requête.\nLe sujet est bien contextualisé.", action: "" };
       }
       if (status === "orange") {
-        return {
-          message:
-            "Le sujet est compris, mais le champ lexical pourrait être enrichi.",
-          action: "👉 Action simple : ajouter des mots naturellement liés à ton sujet.",
-        };
+        return { message: "Le champ lexical peut être enrichi pour renforcer le contexte.", action: "👉 Action simple : ajouter des mots naturellement liés au sujet." };
       }
-      return {
-        message:
-          "Le vocabulaire est trop pauvre pour bien poser le contexte de ta page.",
-        action: "👉 Priorité : enrichir le contenu sans sur-optimiser.",
-      };
+      return { message: "Le champ lexical est trop pauvre pour bien poser le contexte.", action: "👉 Priorité : enrichir sans sur-optimiser." };
     }
 
     default:
@@ -350,11 +310,10 @@ function computeChecks(extracted, keyword) {
 
   // 1) Title (présence + longueur)
   const title = extracted.title || "";
-  const titleLen = title.length;
+  const titleLen = charCount(title);
   let titleStatus = "red";
-  if (titleLen > 0) {
-    titleStatus = titleLen >= 45 && titleLen <= 60 ? "green" : "orange";
-  }
+  if (titleLen > 0) titleStatus = titleLen >= 45 && titleLen <= 60 ? "green" : "orange";
+
   {
     const { message, action } = buildMessagesForCheck("title", titleStatus);
     checks.push({
@@ -367,18 +326,22 @@ function computeChecks(extracted, keyword) {
     });
   }
 
-  // 2) Meta description (présence + longueur)
+  // 2) Meta description (présence + longueur corrigée)
   const meta = extracted.meta_description || "";
-  const metaLen = meta.length;
+  const metaLen = charCount(meta);
+
   let metaStatus = "red";
   if (metaLen > 0) {
-    metaStatus = metaLen >= 140 && metaLen <= 160 ? "green" : "orange";
+    if (metaLen >= 120 && metaLen <= 160) metaStatus = "green";
+    else if ((metaLen >= 70 && metaLen <= 119) || (metaLen >= 161 && metaLen <= 200)) metaStatus = "orange";
+    else metaStatus = "orange";
   }
+
   {
     const { message, action } = buildMessagesForCheck("meta_description", metaStatus);
     checks.push({
       id: "meta_description",
-      label: "Meta description — invitation au clic",
+      label: "Meta description — longueur",
       status: metaStatus,
       message,
       action,
@@ -386,19 +349,16 @@ function computeChecks(extracted, keyword) {
     });
   }
 
-  // 3) H1 unique + aligné (keyword dans H1)
+  // 3) H1 unique + aligné (requête exacte dans le H1 => vert, sinon orange si H1 unique)
   const h1s = extracted.h1s || [];
   let h1Status = "red";
-  if (h1s.length === 1) {
-    h1Status = containsKeyword(h1s[0], keyword) ? "green" : "orange";
-  } else {
-    h1Status = "red";
-  }
+  if (h1s.length === 1) h1Status = containsKeywordExact(h1s[0], keyword) ? "green" : "orange";
+
   {
     const { message, action } = buildMessagesForCheck("h1", h1Status);
     checks.push({
       id: "h1",
-      label: "H1 — sujet principal de la page",
+      label: "H1 — sujet principal",
       status: h1Status,
       message,
       action,
@@ -406,37 +366,35 @@ function computeChecks(extracted, keyword) {
     });
   }
 
-  // 4) Keyword dans la structure : H1 / intro / H2 / conclusion
+  // 4) Requête exacte dans la structure : intro + >=1 H2 + conclusion
   const intro = extracted.intro || "";
   const conclusion = extracted.conclusion || "";
   const h2s = extracted.h2s || [];
 
-  const okH1 = h1s.length ? containsKeyword(h1s.join(" "), keyword) : false;
-  const okIntro = intro ? containsKeyword(intro, keyword) : false;
-  const okH2 = h2s.length ? h2s.some((h2) => containsKeyword(h2, keyword)) : false;
-  const okConc = conclusion ? containsKeyword(conclusion, keyword) : false;
+  const okIntroExact = intro ? containsKeywordExact(intro, keyword) : false;
+  const okH2Exact = h2s.length ? h2s.some((h2) => containsKeywordExact(h2, keyword)) : false;
+  const okConcExact = conclusion ? containsKeywordExact(conclusion, keyword) : false;
 
-  const missing = [];
-  if (!okH1) missing.push("H1");
-  if (!okIntro) missing.push("intro");
-  if (!okH2) missing.push("H2");
-  if (!okConc) missing.push("conclusion");
+  const missingExact = [];
+  if (!okIntroExact) missingExact.push("intro");
+  if (!okH2Exact) missingExact.push("H2");
+  if (!okConcExact) missingExact.push("conclusion");
 
-  const okCount = [okH1, okIntro, okH2, okConc].filter(Boolean).length;
-  let ksStatus = "red";
-  if (okCount === 4) ksStatus = "green";
-  else if (okCount >= 2) ksStatus = "orange";
-  else ksStatus = "red";
+  const exactCount = [okIntroExact, okH2Exact, okConcExact].filter(Boolean).length;
+
+  let exactStatus = "red";
+  if (exactCount === 3) exactStatus = "green";
+  else if (exactCount === 2) exactStatus = "orange";
 
   {
-    const { message, action } = buildMessagesForCheck("keyword_structure", ksStatus, { missing });
+    const { message, action } = buildMessagesForCheck("keyword_exact_structure", exactStatus, { missing: missingExact });
     checks.push({
-      id: "keyword_structure",
-      label: "Requête clé dans la structure",
-      status: ksStatus,
+      id: "keyword_exact_structure",
+      label: "Requête exacte dans la structure (intro + H2 + conclusion)",
+      status: exactStatus,
       message,
       action,
-      data: { ok_h1: okH1, ok_intro: okIntro, ok_h2: okH2, ok_conclusion: okConc, missing },
+      data: { ok_intro: okIntroExact, ok_h2: okH2Exact, ok_conclusion: okConcExact, missing: missingExact },
     });
   }
 
@@ -445,13 +403,12 @@ function computeChecks(extracted, keyword) {
   let structureStatus = "red";
   if (h2Count >= 2) structureStatus = "green";
   else if (h2Count === 1) structureStatus = "orange";
-  else structureStatus = "red";
 
   {
     const { message, action } = buildMessagesForCheck("structure", structureStatus);
     checks.push({
       id: "structure",
-      label: "Structure globale de la page",
+      label: "Structure globale (H2)",
       status: structureStatus,
       message,
       action,
@@ -463,9 +420,7 @@ function computeChecks(extracted, keyword) {
   const imgCount = extracted.images_count || 0;
   const missingAlt = extracted.images_missing_alt_count || 0;
   let imgStatus = "red";
-  if (imgCount === 0) imgStatus = "red";
-  else if (missingAlt > 0) imgStatus = "orange";
-  else imgStatus = "green";
+  if (imgCount > 0) imgStatus = missingAlt > 0 ? "orange" : "green";
 
   {
     const { message, action } = buildMessagesForCheck("images_alt", imgStatus);
@@ -484,13 +439,12 @@ function computeChecks(extracted, keyword) {
   let readStatus = "green";
   if (longP >= 3) readStatus = "red";
   else if (longP >= 1) readStatus = "orange";
-  else readStatus = "green";
 
   {
     const { message, action } = buildMessagesForCheck("readability", readStatus);
     checks.push({
       id: "readability",
-      label: "Lisibilité du texte",
+      label: "Lisibilité (paragraphes)",
       status: readStatus,
       message,
       action,
@@ -501,13 +455,14 @@ function computeChecks(extracted, keyword) {
     });
   }
 
-  // 8) Champ lexical (V1 simple)
-  // Très basique : mots clés génériques + mots de la requête (>=4 lettres)
+  // 8) Champ lexical (critère distinct)
+  // Base : tokens de la requête (>=4 lettres) + petit set générique
   const generic = ["google", "referencement", "seo", "site", "page", "contenu", "visibilite"];
   const kwParts = normalizeForMatch(keyword)
     .split(" ")
     .map((w) => w.trim())
     .filter((w) => w.length >= 4);
+
   const expected = Array.from(new Set([...generic, ...kwParts]));
 
   const bodyText = normalizeForMatch(
@@ -528,13 +483,12 @@ function computeChecks(extracted, keyword) {
   let lexStatus = "red";
   if (found.length >= 4) lexStatus = "green";
   else if (found.length >= 2) lexStatus = "orange";
-  else lexStatus = "red";
 
   {
     const { message, action } = buildMessagesForCheck("lexical", lexStatus);
     checks.push({
       id: "lexical",
-      label: "Champ lexical lié à la requête clé",
+      label: "Champ lexical lié à la requête",
       status: lexStatus,
       message,
       action,
@@ -576,13 +530,9 @@ app.post("/api/audit", async (req, res) => {
 
     const paragraphWordCounts = paragraphs.map(wordsCount);
     const longParagraphsCount = paragraphWordCounts.filter((n) => n > 120).length;
-    const avgWordsPerParagraph =
-      paragraphWordCounts.length
-        ? Math.round(
-            paragraphWordCounts.reduce((a, b) => a + b, 0) /
-              paragraphWordCounts.length
-          )
-        : 0;
+    const avgWordsPerParagraph = paragraphWordCounts.length
+      ? Math.round(paragraphWordCounts.reduce((a, b) => a + b, 0) / paragraphWordCounts.length)
+      : 0;
 
     const extracted = {
       title,
